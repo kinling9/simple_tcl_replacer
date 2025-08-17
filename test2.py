@@ -33,8 +33,8 @@ class TclLexer:
             "SEMICOLON",  # ;
             "OPTION",  # 选项（以-开头的参数）
             "NEWLINE",  # 换行符
-            "NUMBER",  # 数字
-            "OTHER",  # 其他字符
+            # "NUMBER",  # 数字
+            # "OTHER",  # 其他字符
         )
 
         self.lexer = None
@@ -67,12 +67,13 @@ class TclLexer:
         r"-[a-zA-Z_][a-zA-Z0-9_]+"
         return t
 
-    def t_NUMBER(self, t):
-        r"\d+(\.\d+)?"
-        return t
+    # def t_NUMBER(self, t):
+    #     r"\d+(\.\d+)?"
+    #     return t
 
     def t_IDENTIFIER(self, t):
-        r"[a-zA-Z_][a-zA-Z0-9_]*"
+        # r"[a-zA-Z0-9_.\*/!=$(,)&-]+"
+        r'[^"\[\]{}; \t\r\n]+'
         # 检查是否是配置中的函数名
         if t.value in ["else", "elseif", "if", "while", "for", "proc"]:
             t.type = "RESERVED"  # 保留字
@@ -97,9 +98,9 @@ class TclLexer:
         t.lexer.lineno += len(t.value)
         return t
 
-    def t_OTHER(self, t):
-        r'[^\s\[\]{};"a-zA-Z_0-9]+'
-        return t
+    # def t_OTHER(self, t):
+    #     r'[^\s\[\]{};"a-zA-Z_0-9]+'
+    #     return t
 
     # 忽略空白字符（除了换行符）
     t_ignore = " \t\r"
@@ -139,36 +140,13 @@ class TclParser:
         else:
             p[0] = p[1] + [p[2]] + [p[3]]
 
-    # def p_statement_list_single(self, p):
-    #     """statement_list : statement_with_sep
-    #     | statement_without_sep"""
-    #     print("processing single statement")
-    #     p[0] = [p[1]]
-    #
-    # def p_statement_list_empty(self, p):
-    #     """statement_list : empty"""
-    #     print("processing empty statement list, length:", len(p))
-    #     p[0] = []
-    #
-    # def p_statement_without_sep(self, p):
-    #     """statement_with_opt_sep : statement empty"""
-    #     # 没有分隔符的语句（通常是文件末尾）
-    #     print("processing statement without separator, length:", len(p))
-    #     p[0] = p[1]
-    #
-    # def p_statement_with_sep(self, p):
-    #     """statement_with_sep : statement separator"""
-    #     result = p[1]
-    #     print("processing statement with separator, length:", len(p))
-    #     if len(p) > 2 and p[2]:  # 如果有分隔符，添加它
-    #         result += p[2]
-    #     p[0] = result
-
     def p_statement(self, p):
         """statement : function_call
-        | command
-        | expression_standalone"""
-        p[0] = p[1]
+        | expression_standalone_list"""
+        if isinstance(p[1], list):
+            p[0] = self._join_statements(p[1])
+        else:
+            p[0] = p[1]
 
     def p_function_call(self, p):
         """function_call : FUNCTION argument_list"""
@@ -177,6 +155,7 @@ class TclParser:
 
         # 应用替换规则
         if func_name in self.functions_config:
+            print(f"Processing function call: {func_name} with args: {args}")
             func_info = self.functions_config[func_name]
             new_name = func_info.get("replace_name", func_name)
             param_count = func_info.get("param_count", 0)
@@ -209,22 +188,22 @@ class TclParser:
                 result += " " + " ".join(args)
             p[0] = result
 
-    def p_command(self, p):
-        """command : IDENTIFIER argument_list"""
-        # 普通命令（非配置函数）
-        result = p[1]
-        if p[2]:
-            result += " " + " ".join(p[2])
-        p[0] = result
+    def p_expression_standalone_list(self, p):
+        """expression_standalone_list : expression_standalone
+        | expression_standalone_list expression_standalone"""
+        """独立的表达式列表"""
+        if len(p) == 2:
+            p[0] = [p[1]]
+        else:
+            p[0] = p[1] + [p[2]]
 
     def p_expression_standalone(self, p):
         """expression_standalone : STRING
-        | NUMBER
         | RESERVED
         | LBRACE
         | RBRACE
-        | OTHER
-        | IDENTIFIER"""
+        | IDENTIFIER
+        | OPTION"""
         # 独立的表达式（不作为参数）
         p[0] = p[1]
 
@@ -248,15 +227,13 @@ class TclParser:
         """argument_list : argument"""
         p[0] = [p[1]]
 
-    # def p_argument_list_empty(self, p):
-    #     """argument_list : empty"""
-    #     p[0] = []
+    def p_argument_list_empty(self, p):
+        """argument_list : empty"""
+        p[0] = []
 
     def p_argument(self, p):
         """argument : IDENTIFIER
         | STRING
-        | NUMBER
-        | OTHER
         | OPTION
         | LBRACE
         | RBRACE"""
@@ -286,9 +263,9 @@ class TclParser:
         # 处理多个连续分隔符
         p[0] = p[1] + p[2]
 
-    # def p_empty(self, p):
-    #     """empty :"""
-    #     pass
+    def p_empty(self, p):
+        """empty :"""
+        pass
 
     def p_error(self, p):
         if p:
@@ -298,7 +275,7 @@ class TclParser:
 
     def _join_statements(self, statements: List[str]) -> str:
         """将语句列表连接成字符串"""
-        return "".join(statements)
+        return " ".join(statements)
 
     def _process_command_substitution(self, inner_content: str) -> str:
         """递归处理命令替换内部的内容"""
