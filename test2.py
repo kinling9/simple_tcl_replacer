@@ -28,8 +28,8 @@ class TclLexer:
             "STRING",  # 字符串（带引号）
             "COMMAND_SUB",  # 命令替换 [...]
             "RESERVED",  # 保留字（如if, else等）
-            "LBRACE",  # {
-            "RBRACE",  # }
+            # "LBRACE",  # {
+            # "RBRACE",  # }
             "SEMICOLON",  # ;
             "OPTION",  # 选项（以-开头的参数）
             "NEWLINE",  # 换行符
@@ -73,7 +73,7 @@ class TclLexer:
 
     def t_IDENTIFIER(self, t):
         # r"[a-zA-Z0-9_.\*/!=$(,)&-]+"
-        r'[^"\[\]{}; \t\r\n]+'
+        r'[^"\[\]; \t\r\n]+'
         # 检查是否是配置中的函数名
         if t.value in ["else", "elseif", "if", "while", "for", "proc"]:
             t.type = "RESERVED"  # 保留字
@@ -81,13 +81,13 @@ class TclLexer:
             t.type = "FUNCTION"
         return t
 
-    def t_LBRACE(self, t):
-        r"\{"
-        return t
-
-    def t_RBRACE(self, t):
-        r"\}"
-        return t
+    # def t_LBRACE(self, t):
+    #     r"\{"
+    #     return t
+    #
+    # def t_RBRACE(self, t):
+    #     r"\}"
+    #     return t
 
     def t_SEMICOLON(self, t):
         r";"
@@ -200,8 +200,6 @@ class TclParser:
     def p_expression_standalone(self, p):
         """expression_standalone : STRING
         | RESERVED
-        | LBRACE
-        | RBRACE
         | IDENTIFIER
         | OPTION"""
         # 独立的表达式（不作为参数）
@@ -234,9 +232,7 @@ class TclParser:
     def p_argument(self, p):
         """argument : IDENTIFIER
         | STRING
-        | OPTION
-        | LBRACE
-        | RBRACE"""
+        | OPTION"""
         p[0] = p[1]
 
     def p_argument_command_sub(self, p):
