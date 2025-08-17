@@ -124,11 +124,22 @@ class TclParser:
 
     def p_tcl_script(self, p):
         """tcl_script : statement_list
-        | statement_list separator"""
+        | statement_list separator
+        | separator statement_list
+        | separator statement_list separator
+        | separator"""
         if len(p) == 2:
-            p[0] = self._join_statements(p[1])
-        else:
-            p[0] = self._join_statements(p[1]) + p[2]
+            if isinstance(p[1], list):  # statement_list
+                p[0] = self._join_statements(p[1])
+            else:  # separator only
+                p[0] = p[1]
+        elif len(p) == 3:
+            if isinstance(p[1], list):  # statement_list separator
+                p[0] = self._join_statements(p[1]) + p[2]
+            else:  # separator statement_list
+                p[0] = p[1] + self._join_statements(p[2])
+        else:  # separator statement_list separator
+            p[0] = p[1] + self._join_statements(p[2]) + p[3]
 
     def p_statement_list_multiple(self, p):
         """statement_list : statement
