@@ -63,11 +63,6 @@ class TclLexer:
             t.lexer.lexpos = i
         return t
 
-    # def t_STRING(self, t):
-    #     # r'"([^"\\]|\\.)*"'
-    #     r'"(?:[^"\\\[\]]|\\.)*"'
-    #     return t
-
     def t_STRING_OR_QUOTE(self, t):
         r'"'
         # Look ahead to determine if this is a complete string or just a quote
@@ -120,15 +115,6 @@ class TclLexer:
     def t_OPTION(self, t):
         r"-[a-zA-Z_][a-zA-Z0-9_]+"
         return t
-
-    # def t_IDENTIFIER(self, t):
-    #     r'[^"\[\]; \t\r\n]+'
-    #     # Check if it's a function name from config
-    #     if t.value in ["else", "elseif", "if", "while", "for", "proc"]:
-    #         t.type = "RESERVED"  # Reserved word
-    #     elif t.value in self.function_names:
-    #         t.type = "FUNCTION"
-    #     return t
 
     def t_IDENTIFIER(self, t):
         r'[^"\[\]; \t\r\n]+(?:\[[^"\[\]; \t\r\n]*\])*'
@@ -445,12 +431,6 @@ class TclReplacer:
             with open(input_file, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            # Display token analysis first
-            logging.info("Token analysis:")
-            tokens = self.tokenize(content)
-            for i, token in enumerate(tokens):
-                logging.info(f"  {i+1:2d}. {token.type:12s}: '{token.value}'")
-
             logging.info("\nSyntax analysis and replacement:")
             result = self.parse_and_replace(content)
 
@@ -476,12 +456,6 @@ class TclReplacer:
         """For debugging: parse and print result"""
         logging.info(f"Original code: {code}")
         logging.info("=" * 50)
-
-        # Display token analysis first
-        logging.info("Token analysis:")
-        tokens = self.tokenize(code)
-        for i, token in enumerate(tokens):
-            logging.info(f"  {i+1:2d}. {token.type:12s}: '{token.value}'")
 
         logging.info("\nSyntax analysis and replacement:")
         result = self.parse_and_replace(code)
@@ -595,6 +569,8 @@ def main():
     if args.debug:
         config_file, test_code = args.debug
         try:
+            replacer_token = TclReplacer(config_file)
+            replacer_token.debug_tokens(test_code)
             replacer = TclReplacer(config_file)
             replacer.debug_parse(test_code)
         except Exception as e:
@@ -607,6 +583,11 @@ def main():
     # Process file replacement
     config_file, input_file, output_file = args.process
     try:
+        replacer_token = TclReplacer(config_file)
+
+        with open(input_file, "r", encoding="utf-8") as f:
+            content = f.read()
+            replacer_token.debug_tokens(content)
         replacer = TclReplacer(config_file)
         replacer.replace_file(input_file, output_file)
     except Exception as e:
