@@ -71,8 +71,17 @@ class TclLexer:
         r"-[a-zA-Z_][a-zA-Z0-9_]+"
         return t
 
+    # def t_IDENTIFIER(self, t):
+    #     r'[^"\[\]; \t\r\n]+'
+    #     # Check if it's a function name from config
+    #     if t.value in ["else", "elseif", "if", "while", "for", "proc"]:
+    #         t.type = "RESERVED"  # Reserved word
+    #     elif t.value in self.function_names:
+    #         t.type = "FUNCTION"
+    #     return t
+
     def t_IDENTIFIER(self, t):
-        r'[^"\[\]; \t\r\n]+'
+        r'[^"\[\]; \t\r\n]+(?:\[[^"\[\]; \t\r\n]*\])*'
         # Check if it's a function name from config
         if t.value in ["else", "elseif", "if", "while", "for", "proc"]:
             t.type = "RESERVED"  # Reserved word
