@@ -80,32 +80,30 @@ class TclLexer:
 
             if char == '"':
                 # Found closing quote - this is a complete string
-                # Check if there are any unescaped brackets inside
-                content = t.lexer.lexdata[start_pos + 1 : i]
-                has_unescaped_brackets = False
-                j = 0
-                while j < len(content):
-                    if content[j] == "\\":
-                        j += 2  # Skip escaped character
-                    elif content[j] == "[":
-                        has_unescaped_brackets = True
-                        break
-                    else:
-                        j += 1
-
-                if has_unescaped_brackets:
-                    # Contains command substitution - just return the opening quote
+                t.type = "STRING"
+                t.value = t.lexer.lexdata[start_pos : i + 1]
+                t.lexer.lexpos = i + 1
+                return t
+            elif char == "\\":
+                i += 2  # Skip escaped character
+            elif char == "[":
+                # Found '[' inside quotes - check if it should trigger command substitution
+                # Command substitution triggers if '[' appears:
+                # 1. Immediately after opening quote, OR
+                # 2. After whitespace characters (space, tab, newline, etc.)
+                if i == start_pos + 1:  # Immediately after opening quote
+                    t.type = "IDENTIFIER"
+                    t.value = '"'
+                    return t
+                elif (
+                    i > start_pos + 1 and t.lexer.lexdata[i - 1] in " \t\r\n\f\v"
+                ):  # After whitespace
+                    # Return partial string up to the whitespace, then let next tokens handle the rest
                     t.type = "IDENTIFIER"
                     t.value = '"'
                     return t
                 else:
-                    # Complete string without command substitution
-                    t.type = "STRING"
-                    t.value = t.lexer.lexdata[start_pos : i + 1]
-                    t.lexer.lexpos = i + 1
-                    return t
-            elif char == "\\":
-                i += 2  # Skip escaped character
+                    i += 1
             elif char == "\n" or char == "\r":
                 # Unterminated string - treat as quote
                 t.type = "IDENTIFIER"
