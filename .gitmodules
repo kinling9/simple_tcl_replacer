@@ -1,0 +1,3 @@
+[submodule "config"]
+	path = config
+	url = git@github.com:kinling9/tcl_replacer_config.git
