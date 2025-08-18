@@ -167,6 +167,7 @@ class TclParser:
             new_name = func_info.get("replace_name", func_name)
             param_count = func_info.get("param_count", 0)
             options_config = func_info.get("options", {})
+            params_config = func_info.get("params", {})
 
             # Process arguments and options
             processed_args = []
@@ -179,7 +180,18 @@ class TclParser:
                     processed_args.append(new_option)
                 else:
                     # Regular parameter
-                    processed_args.append(arg)
+                    params_matched = False
+                    for param_pattern, param_info in params_config.items():
+                        replace_pattern = param_info.get("replace_pattern", None)
+                        if replace_pattern and re.match(param_pattern, arg):
+                            new_param = re.sub(param_pattern, replace_pattern, arg)
+                            processed_args.append(new_param)
+                            params_matched = True
+                            if not arg.startswith("-"):
+                                current_params += 1
+                            break
+                    if not params_matched:
+                        processed_args.append(arg)
                     if not arg.startswith("-"):
                         current_params += 1
 
@@ -480,25 +492,6 @@ def main():
         description="Tcl function and option replacement tool based on TOML configuration"
     )
 
-    # # Add mutually exclusive group for commands
-    # group = parser.add_mutually_exclusive_group(required=True)
-    # group.add_argument(
-    #     "--create-sample",
-    #     action="store_true",
-    #     help="Create sample configuration and test files",
-    # )
-    # group.add_argument(
-    #     "--debug",
-    #     nargs=2,
-    #     metavar=("CONFIG", "CODE"),
-    #     help="Debug mode: parse and replace given Tcl code using specified config",
-    # )
-    # group.add_argument(
-    #     "files",
-    #     nargs=3,
-    #     metavar=("CONFIG", "INPUT", "OUTPUT"),
-    #     help="Path to config file, input Tcl file, and output file",
-    # )
     # Add mutually exclusive group for commands
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
