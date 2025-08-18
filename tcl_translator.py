@@ -63,8 +63,60 @@ class TclLexer:
             t.lexer.lexpos = i
         return t
 
-    def t_STRING(self, t):
-        r'"([^"\\]|\\.)*"'
+    # def t_STRING(self, t):
+    #     # r'"([^"\\]|\\.)*"'
+    #     r'"(?:[^"\\\[\]]|\\.)*"'
+    #     return t
+
+    def t_STRING_OR_QUOTE(self, t):
+        r'"'
+        # Look ahead to determine if this is a complete string or just a quote
+        start_pos = t.lexpos
+        i = start_pos + 1
+
+        # Scan forward to see what's inside the quotes
+        while i < len(t.lexer.lexdata):
+            char = t.lexer.lexdata[i]
+
+            if char == '"':
+                # Found closing quote - this is a complete string
+                # Check if there are any unescaped brackets inside
+                content = t.lexer.lexdata[start_pos + 1 : i]
+                has_unescaped_brackets = False
+                j = 0
+                while j < len(content):
+                    if content[j] == "\\":
+                        j += 2  # Skip escaped character
+                    elif content[j] == "[":
+                        has_unescaped_brackets = True
+                        break
+                    else:
+                        j += 1
+
+                if has_unescaped_brackets:
+                    # Contains command substitution - just return the opening quote
+                    t.type = "IDENTIFIER"
+                    t.value = '"'
+                    return t
+                else:
+                    # Complete string without command substitution
+                    t.type = "STRING"
+                    t.value = t.lexer.lexdata[start_pos : i + 1]
+                    t.lexer.lexpos = i + 1
+                    return t
+            elif char == "\\":
+                i += 2  # Skip escaped character
+            elif char == "\n" or char == "\r":
+                # Unterminated string - treat as quote
+                t.type = "IDENTIFIER"
+                t.value = '"'
+                return t
+            else:
+                i += 1
+
+        # Reached end of input without closing quote - treat as quote
+        t.type = "IDENTIFIER"
+        t.value = '"'
         return t
 
     def t_OPTION(self, t):
@@ -82,11 +134,25 @@ class TclLexer:
 
     def t_IDENTIFIER(self, t):
         r'[^"\[\]; \t\r\n]+(?:\[[^"\[\]; \t\r\n]*\])*'
+
+        # Get the last token (if any)
+        if hasattr(self.lexer, "lasttoken"):
+            # If last token was "set", this must be an identifier
+            if (
+                self.lexer.lasttoken != None
+                and self.lexer.lasttoken.type == "IDENTIFIER"
+                and self.lexer.lasttoken.value == "set"
+            ):
+                return t
+
         # Check if it's a function name from config
         if t.value in ["else", "elseif", "if", "while", "for", "proc"]:
             t.type = "RESERVED"  # Reserved word
         elif t.value in self.function_names:
             t.type = "FUNCTION"
+
+        # backup the last token
+        self.lexer.lasttoken = t
         return t
 
     def t_SEMICOLON(self, t):
@@ -108,6 +174,7 @@ class TclLexer:
     def build(self):
         """Build the lexer"""
         self.lexer = lex.lex(module=self)
+        self.lexer.lasttoken = None
         return self.lexer
 
 
