@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple, Any
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 
@@ -78,6 +78,7 @@ class TclLexer:
                 t.type = "STRING"
                 t.value = t.lexer.lexdata[start_pos : i + 1]
                 t.lexer.lexpos = i + 1
+                self.lexer.lasttoken = t
                 return t
             elif char == "\\":
                 i += 2  # Skip escaped character
@@ -89,13 +90,14 @@ class TclLexer:
                 if i == start_pos + 1:  # Immediately after opening quote
                     t.type = "IDENTIFIER"
                     t.value = '"'
+                    self.lexer.lasttoken = t
                     return t
                 elif (
                     i > start_pos + 1 and t.lexer.lexdata[i - 1] in " \t\r\n\f\v"
                 ):  # After whitespace
-                    # Return partial string up to the whitespace, then let next tokens handle the rest
                     t.type = "IDENTIFIER"
                     t.value = '"'
+                    self.lexer.lasttoken = t
                     return t
                 else:
                     i += 1
@@ -103,6 +105,7 @@ class TclLexer:
                 # Unterminated string - treat as quote
                 t.type = "IDENTIFIER"
                 t.value = '"'
+                self.lexer.lasttoken = t
                 return t
             else:
                 i += 1
@@ -110,6 +113,7 @@ class TclLexer:
         # Reached end of input without closing quote - treat as quote
         t.type = "IDENTIFIER"
         t.value = '"'
+        self.lexer.lasttoken = t
         return t
 
     def t_OPTION(self, t):
