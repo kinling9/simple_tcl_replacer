@@ -6,6 +6,7 @@ SupportsTcl function names and options with precise replacement based on TOML co
 Uses syntax analysis instead of simple string replacement
 """
 
+from os import wait
 import ply.lex as lex
 import ply.yacc as yacc
 import toml
@@ -65,54 +66,42 @@ class TclLexer:
 
     def t_STRING_OR_QUOTE(self, t):
         r'"'
-        # Look ahead to determine if this is a complete string or just a quote
         start_pos = t.lexpos
         i = start_pos + 1
+        lexdata = t.lexer.lexdata
 
-        # Scan forward to see what's inside the quotes
-        while i < len(t.lexer.lexdata):
-            char = t.lexer.lexdata[i]
+        while i < len(lexdata):
+            char = lexdata[i]
 
             if char == '"':
-                # Found closing quote - this is a complete string
                 t.type = "STRING"
-                t.value = t.lexer.lexdata[start_pos : i + 1]
+                t.value = lexdata[start_pos : i + 1]
                 t.lexer.lexpos = i + 1
-                self.lexer.lasttoken = t
-                return t
+                break
             elif char == "\\":
-                i += 2  # Skip escaped character
+                i += 2
             elif char == "[":
-                # Found '[' inside quotes - check if it should trigger command substitution
-                # Command substitution triggers if '[' appears:
-                # 1. Immediately after opening quote, OR
-                # 2. After whitespace characters (space, tab, newline, etc.)
-                if i == start_pos + 1:  # Immediately after opening quote
+                if i == start_pos + 1 or (
+                    i > start_pos + 1 and lexdata[i - 1] in " \t\r\n\f\v"
+                ):
                     t.type = "IDENTIFIER"
                     t.value = '"'
-                    self.lexer.lasttoken = t
-                    return t
-                elif (
-                    i > start_pos + 1 and t.lexer.lexdata[i - 1] in " \t\r\n\f\v"
-                ):  # After whitespace
-                    t.type = "IDENTIFIER"
-                    t.value = '"'
-                    self.lexer.lasttoken = t
-                    return t
-                else:
-                    i += 1
-            elif char == "\n" or char == "\r":
-                # Unterminated string - treat as quote
+                    t.lexer.lexpos = start_pos + 1
+                    break
+                i += 1
+            elif char in "\r\n":
                 t.type = "IDENTIFIER"
                 t.value = '"'
-                self.lexer.lasttoken = t
-                return t
+                t.lexer.lexpos = start_pos + 1
+                break
             else:
                 i += 1
+        else:
+            # Unterminated string
+            t.type = "IDENTIFIER"
+            t.value = '"'
+            t.lexer.lexpos = start_pos + 1
 
-        # Reached end of input without closing quote - treat as quote
-        t.type = "IDENTIFIER"
-        t.value = '"'
         self.lexer.lasttoken = t
         return t
 
@@ -123,20 +112,14 @@ class TclLexer:
     def t_IDENTIFIER(self, t):
         r'[^"\[\]; \t\r\n]+(?:\[[^"\[\]; \t\r\n]*\])*'
 
-        # Get the last token (if any)
-        if hasattr(self.lexer, "lasttoken"):
-            # If last token was "set", this must be an identifier
-            if (
-                self.lexer.lasttoken != None
-                and self.lexer.lasttoken.type == "IDENTIFIER"
-                and self.lexer.lasttoken.value == "set"
-            ):
-                return t
-
         # Check if it's a function name from config
         if t.value in ["else", "elseif", "if", "while", "for", "proc"]:
             t.type = "RESERVED"  # Reserved word
-        elif t.value in self.function_names:
+        elif (
+            hasattr(self.lexer, "lasttoken")
+            and self.lexer.lasttoken.type in ["SEMICOLON", "NEWLINE"]
+            and t.value in self.function_names
+        ):
             t.type = "FUNCTION"
 
         # backup the last token
@@ -145,11 +128,13 @@ class TclLexer:
 
     def t_SEMICOLON(self, t):
         r";"
+        self.lexer.lasttoken = t
         return t
 
     def t_NEWLINE(self, t):
         r"\n+"
         t.lexer.lineno += len(t.value)
+        self.lexer.lasttoken = t
         return t
 
     # Ignore whitespace characters (except newlines)
@@ -162,7 +147,8 @@ class TclLexer:
     def build(self):
         """Build the lexer"""
         self.lexer = lex.lex(module=self)
-        self.lexer.lasttoken = None
+        self.lexer.lasttoken = lex.LexToken()
+        self.lexer.lasttoken.type = "NEWLINE"
         return self.lexer
 
 
@@ -195,9 +181,7 @@ class TclParser:
     def p_statement_list_multiple(self, p):
         """statement_list : statement
         | statement_list separator statement"""
-        logging.debug("Processing multiple statements, length: %d", len(p))
         if len(p) == 2:
-            logging.debug("  Single statement: %s", p[1])
             p[0] = [p[1]]
         else:
             p[0] = p[1] + [p[2]] + [p[3]]
@@ -220,13 +204,11 @@ class TclParser:
             logging.info(f"Processing function call: {func_name} with args: {args}")
             func_info = self.functions_config[func_name]
             new_name = func_info.get("replace_name", func_name)
-            param_count = func_info.get("param_count", 0)
             options_config = func_info.get("options", {})
             params_config = func_info.get("params", {})
 
             # Process arguments and options
             processed_args = []
-            current_params = 0
 
             for arg in args:
                 if arg.startswith("-") and arg in options_config:
@@ -234,21 +216,12 @@ class TclParser:
                     new_option = options_config[arg].get("replace_name", arg)
                     processed_args.append(new_option)
                 else:
-                    # Regular parameter
-                    params_matched = False
                     for param_pattern, param_info in params_config.items():
-                        replace_pattern = param_info.get("replace_pattern", None)
+                        replace_pattern = param_info.get("replace_pattern")
                         if replace_pattern and re.match(param_pattern, arg):
-                            new_param = re.sub(param_pattern, replace_pattern, arg)
-                            processed_args.append(new_param)
-                            params_matched = True
-                            if not arg.startswith("-"):
-                                current_params += 1
+                            arg = re.sub(param_pattern, replace_pattern, arg)
                             break
-                    if not params_matched:
-                        processed_args.append(arg)
-                    if not arg.startswith("-"):
-                        current_params += 1
+                    processed_args.append(arg)
 
             # Build replaced function call
             result = new_name
@@ -266,6 +239,7 @@ class TclParser:
         """expression_standalone_list : expression_standalone
         | expression_standalone_list expression_standalone"""
         """List of standalone expressions"""
+        logging.debug(f"Processing standalone expressions: {p[1:]}")
         if len(p) == 2:
             p[0] = [p[1]]
         else:
@@ -373,14 +347,30 @@ class TclParser:
         return self.parser
 
 
+def debug_tokens(config_file: str, code: str):
+    """Debug function to print tokens"""
+    lexer_obj = TclLexer(toml.load(config_file))
+    lexer = lexer_obj.build()
+    lexer.input(code)
+    tokens = []
+    while True:
+        tok = lexer.token()
+        if not tok:
+            break
+        tokens.append(tok)
+    for token in tokens:
+        logging.debug(f"{token.type}: '{token.value}' at line {token.lineno}")
+
+
 class TclReplacer:
-    def __init__(self, config_file: str):
+    def __init__(self, config_file: str, debug: bool = False):
         """Initialize the replacer
 
         Args:
             config_file: Path to TOML configuration file
         """
         self.config_file = config_file
+        self.debug = debug
         self.config = toml.load(config_file)
         self.functions = self.config.get("functions", {})
 
@@ -401,24 +391,13 @@ class TclReplacer:
         try:
             # Recursively parse inner content
             inner_parser = TclReplacer(self.config_file)
-            processed_inner = inner_parser.debug_parse(inner_content)
+            processed_inner = inner_parser.parse(inner_content)
             return "[" + processed_inner + "]"
         except Exception as e:
             logging.warning(
                 f"Failed to process command substitution '{command_sub}': {e}"
             )
             return command_sub
-
-    def tokenize(self, code: str) -> List[Any]:
-        """Perform lexical analysis on Tcl code"""
-        self.lexer.input(code)
-        tokens = []
-        while True:
-            tok = self.lexer.token()
-            if not tok:
-                break
-            tokens.append(tok)
-        return tokens
 
     def parse_and_replace(self, code: str) -> str:
         """Parse and replace Tcl code"""
@@ -435,12 +414,7 @@ class TclReplacer:
             with open(input_file, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            logging.info("\nSyntax analysis and replacement:")
-            result = self.parse_and_replace(content)
-
-            logging.info(f"After replacement: {result}")
-            logging.info("=" * 50)
-
+            result = self.parse(content)
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(result)
 
@@ -449,84 +423,20 @@ class TclReplacer:
         except Exception as e:
             logging.error(f"Error processing file: {e}")
 
-    def debug_tokens(self, code: str):
-        """For debugging: print all tokens"""
-        logging.debug(f"Debug tokens for: {code}")
-        tokens = self.tokenize(code)
-        for token in tokens:
-            logging.debug(f"  {token.type}: '{token.value}' at line {token.lineno}")
-
-    def debug_parse(self, code: str):
+    def parse(self, code: str) -> str:
         """For debugging: parse and print result"""
         logging.info(f"Original code: {code}")
         logging.info("=" * 50)
+
+        if self.debug:
+            debug_tokens(self.config_file, code)
 
         logging.info("\nSyntax analysis and replacement:")
         result = self.parse_and_replace(code)
         logging.info(f"After replacement: {result}")
         logging.info("=" * 50)
 
-        # Test recursive processing of command substitution
-        if "[" in code and "]" in code:
-            logging.info(
-                "✓ Detected command substitution, recursive processing enabled"
-            )
         return result
-
-
-def create_sample_config():
-    """Create sample configuration file"""
-    sample_config = """
-# Tcl function replacement configuration example
-
-[functions.old_proc]
-replace_name = "new_proc"
-param_count = 2
-
-[functions.old_proc.options]
-"-help" = { replace_name = "-h" }
-"-verbose" = { replace_name = "-v" }
-"-output" = { replace_name = "-o" }
-
-[functions.test_func]
-replace_name = "better_func"
-param_count = 1
-
-[functions.test_func.options]
-"-debug" = { replace_name = "-d" }
-"-quiet" = { replace_name = "-q" }
-
-[functions.legacy_cmd]
-replace_name = "modern_cmd"
-param_count = 0
-
-[functions.legacy_cmd.options]
-"-force" = { replace_name = "-f" }
-"""
-    with open("sample_config.toml", "w", encoding="utf-8") as f:
-        f.write(sample_config)
-    logging.info("Created sample configuration file: sample_config.toml")
-
-
-def create_sample_tcl():
-    """Create sample Tcl file for testing"""
-    sample_tcl = """# Sample Tcl code
-old_proc -help arg1 arg2
-test_func -debug param1; legacy_cmd -force
-
-# Test command substitution
-set result [old_proc -verbose [test_func -quiet inner_arg]]
-puts $result
-
-# Test nested command substitution
-set complex [old_proc -output [legacy_cmd -force] [test_func -debug nested]]
-
-# Regular command (will not be replaced)
-other_command -some_option value
-"""
-    with open("sample_input.tcl", "w", encoding="utf-8") as f:
-        f.write(sample_tcl)
-    logging.info("Created sample Tcl file: sample_input.tcl")
 
 
 def main():
@@ -537,11 +447,6 @@ def main():
 
     # Add mutually exclusive group for commands
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--create-sample",
-        action="store_true",
-        help="Create sample configuration and test files",
-    )
     group.add_argument(
         "--debug",
         nargs=2,
@@ -558,25 +463,11 @@ def main():
     # Parse arguments
     args = parser.parse_args()
 
-    if args.create_sample:
-        create_sample_config()
-        create_sample_tcl()
-        logging.info("\nExample usage:")
-        logging.info(
-            "python tcl_replacer.py --proces sample_config.toml sample_input.tcl output.tcl"
-        )
-        logging.info(
-            'python tcl_replacer.py --debug sample_config.toml "old_proc -help [test_func -debug arg]"'
-        )
-        return
-
     if args.debug:
         config_file, test_code = args.debug
         try:
-            replacer_token = TclReplacer(config_file)
-            replacer_token.debug_tokens(test_code)
-            replacer = TclReplacer(config_file)
-            replacer.debug_parse(test_code)
+            replacer = TclReplacer(config_file, debug=True)
+            replacer.parse(test_code)
         except Exception as e:
             logging.error(f"Debug error: {e}")
             import traceback
@@ -587,11 +478,6 @@ def main():
     # Process file replacement
     config_file, input_file, output_file = args.process
     try:
-        replacer_token = TclReplacer(config_file)
-
-        with open(input_file, "r", encoding="utf-8") as f:
-            content = f.read()
-            replacer_token.debug_tokens(content)
         replacer = TclReplacer(config_file)
         replacer.replace_file(input_file, output_file)
     except Exception as e:
